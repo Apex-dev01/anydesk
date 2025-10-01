@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Remote Studio — Client</title>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<style>
+  body { font-family: system-ui; margin: 12px; }
+  video { width: 100%; height: auto; background: #000; border: 1px solid #444; }
+  label, input, button { margin: 4px 0; display: block; }
+</style>
+</head>
+<body>
+<h2>Remote Studio — Client</h2>
+
+<label>Server URL:
+  <input id="serverUrl" value="http://YOUR-HOST-IP:3000">
+</label>
+
+<label>Session ID:
+  <input id="sessionId" value="studio-1">
+</label>
+
+<button id="connectBtn">Connect</button>
+<video id="remoteVideo" autoplay playsinline></video>
+
+<script>
+const connectBtn = document.getElementById('connectBtn');
+const sessionInput = document.getElementById('sessionId');
+const serverInput = document.getElementById('serverUrl');
+const remoteVideo = document.getElementById('remoteVideo');
+
+let socket, pc;
+
+connectBtn.onclick = async () => {
+  const sessionId = sessionInput.value.trim();
+  const serverUrl = serverInput.value.trim();
+  if (!sessionId || !serverUrl) return alert('Fill session ID and server URL');
+
+  socket = io(serverUrl);
+
+  socket.on('connect', () => {
+    console.log('Connected to signaling server');
+    socket.emit('join', { sessionId, role: 'client' });
+    startConnection();
+  });
+
+  socket.on('answer', async ({ sdp }) => {
+    await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+  });
+
+  socket.on('ice-candidate', ({ candidate }) => {
+    if (candidate) pc.addIceCandidate(new RTCIceCandidate(candidate));
+  });
+};
+
+async function startConnection() {
+  pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+
+  pc.onicecandidate = ev => {
+    if (ev.candidate) socket.emit('ice-candidate', {
+      candidate: ev.candidate,
+      target: 'host',
+      sessionId: sessionInput.value
+    });
+  };
+
+  pc.ontrack = ev => {
+    remoteVideo.srcObject = ev.streams[0];
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  socket.emit('offer', { sessionId: sessionInput.value, sdp: pc.localDescription });
+}
+</script>
+</body>
+</html>
